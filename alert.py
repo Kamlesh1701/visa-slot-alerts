@@ -79,46 +79,78 @@ ALL_CITIES = {
 VISA_TYPE_ALIASES = {
     "b1/b2": ["b1/b2", "b1b2", "b2", "b1", "visitor", "tourist", "business"],
     "f1": ["f1", "f-1", "student"],
-    "h1b": ["h1b", "h-1b", "h1"],
+    "h1b": ["h1b", "h-1b", "h1", "h-1"],
     "h4": ["h4", "h-4"],
-    "l1": ["l1", "l-1"],
+    "l1": ["l1", "l-1", "l1a", "l1b", "l2", "l-2"],
+    "f2": ["f2", "f-2"],
+    "j1": ["j1", "j-1", "j2"],
+    "o1": ["o1", "o-1"],
     "dropbox": ["dropbox", "drop box", "iw", "interview waiver"],
 }
 
-# Signals that a slot is actually open.
-POSITIVE = re.compile(
-    r"\b(go|open(ed|ing)?|available|avail|slots?\s+(are\s+)?(open|up|out|live|available)|"
-    r"bulk|released?|showing|grab|hurry|check\s+(now|portal)|"
-    r"ofc|vac|biometric|consular|vi\b)",
-    re.I,
-)
-# A concrete date in the message is a strong signal too (e.g. "14 Feb", "Feb 14", "2026-02-14", "14/02").
-DATE = re.compile(
-    r"\b(\d{1,2}\s*[-/ ]\s*(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*|"
-    r"(jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)[a-z]*\s+\d{1,2}|"
-    r"\d{4}-\d{2}-\d{2}|\d{1,2}/\d{1,2}(/\d{2,4})?)\b",
-    re.I,
-)
-# Signals that there is NO slot — these override positives.
+# ---------------------------------------------------------------------------
+# Classification rules. Tuned against ~200 recent messages per channel.
+# ---------------------------------------------------------------------------
+MONTH_RE = (r"(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|"
+            r"sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)")
+MONTH_NUM = {"jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6, "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12}
+# "14 Feb", "05 Nov, 26", "14th feb 2026", "27-May"
+DATE_DM = re.compile(rf"\b(\d{{1,2}})(?:st|nd|rd|th)?\s*[-/ ]?\s*{MONTH_RE}\b\.?,?\s*'?(\d{{2}}(?:\d{{2}})?)?\b", re.I)
+# "Feb 14", "Nov 04 2026", "May 19 '27", "June 7"
+DATE_MD = re.compile(rf"\b{MONTH_RE}\b\.?\s+(\d{{1,2}})(?:st|nd|rd|th)?(?!\s*(?:days?|slots?|min|hrs?|hours?|months?|weeks?|years?|am|pm)\b)(?:,?\s*'?(\d{{2}}(?:\d{{2}})?))?\b", re.I)
+DATE_ISO = re.compile(r"\b(20\d{2})-(\d{2})-(\d{2})\b")
+# "May", "June 2027", "dec'26" — month with optional year, used when no full date present
+MONTH_ONLY = re.compile(rf"\b{MONTH_RE}\b\.?,?\s*'?(20\d{{2}}|\d{{2}})?\b", re.I)
+ANY_DATE = re.compile(rf"\b\d{{1,2}}\s*[-/ ]?\s*{MONTH_RE}|\b{MONTH_RE}\.?\s+\d{{1,2}}\b|\b20\d{{2}}-\d{{2}}-\d{{2}}\b", re.I)
+
+CITY_RE = "|".join(re.escape(a) for al in ALL_CITIES.values() for a in al)
+SLOT_NOUN = re.compile(rf"\b(slots?|dates?|appointments?|appts?|ofc|vac|biometrics?|consular|interview|all|both|{MONTH_RE}|{CITY_RE})\b", re.I)
+AVAIL_VERB = re.compile(r"\b(open(?:ed|ing|ings|s)?|available|avail|showing|released?|bulk|appeared|popped)\b", re.I)
+# "got/booked X in <city>" confirmations: weak but real signal that a release is happening right now.
+CONFIRM = re.compile(rf"\b(got|booked|grabbed|secured)\b.*\b(ofc|vac|consular|biometrics?|slots?|{CITY_RE})\b|\b(ofc|vac|consular|biometrics?|slots?|{CITY_RE})\b.*\b(got|booked|grabbed|secured)\b", re.I)
+CONFIRM_BLOCK = re.compile(r"\b(thank\w*|thx|yesterday|ago|days?\s+back|last\s+(week|night|time|month)|earlier|my\s+company|agenc\w*|reschedul\w*|already)\b", re.I)
+# Things that mean "go check right now" regardless of anything else.
+STRONG = re.compile(r"GUYS\s+CHECK|\bcheck\s+(now|portal|guys|fast)\b|\bhurry\b|\btry\s+now\b|\bbook\s+now\b|\bavailable\s+now\b|\bslots?\s+(are\s+)?(open|out|up|live)\b|\bbulk\b|\bburst\b|✅|🚨\s*slots?\s+open", re.I)
+STRONG_CASE = re.compile(r"\bGO\b|GUYS\s+CHECK|\bGo\s+(?=\w)")  # case-sensitive: "GO", "Go Mumbai OFC" (not "go to the page")
+BOT_COUNT = re.compile(r"\b(slots?|number\s+of\s+slots?)\s*:\s*([1-9]\d*)\b", re.I)
+
+# No slot / dead end. Overrides everything except STRONG bot markers.
 NEGATIVE = re.compile(
-    r"\b(na|n/a|not\s+available|no\s+(slots?|appointments?|dates?)|nothing|none|gone|"
-    r"closed|vanished|disappeared|ghost|anyone\s+(got|seeing)|any\s+(slots?|update|luck)\?*|"
-    r"is\s+there|please\s+help|how\s+to|\?)\b",
+    r"\b(na|n/?a|nsa|not\s+available|unavailable|no\s+(slots?|appointments?|dates?|availability|luck)|nothing|none|gone|"
+    r"closed|vanish\w*|disappear\w*|ghost|no\s+longer|missed|missing|don'?t\s+see|not\s+seeing|can'?t\s+see|"
+    r"never|always|usually|exceeded|rate\s*limit\w*|too\s+many\s+requests|error|locked|blocked|stuck|not\s+loading|"
+    r"doesn'?t\s+load|expired|waiting\s+for|still\s+waiting|hoping|wish|no\s+point|pointless|useless|waste|lottery|unpredictab\w*|people'?s?|someone|everyone|it'?s\s+true|keeps|pushing|struggl\w*|frustrat\w*|sad|unlucky)\b|🛑|❌|⛔",
     re.I,
 )
-# Agents selling slots. Anything matching this is dropped outright.
+# Dates in these contexts are personal history/paperwork, not slot sightings.
+NOT_SLOT = re.compile(
+    r"\b(reject\w*|refus\w*|expir\w*|valid\s+(till|until|through|upto|up\s+to)|challan|receipt|passport|221\s*\(?g\)?|"
+    r"approved|administrative|stamp\w*|interview\s+(went|was|done|on|is\s+on)|travel\w*\s+on|flight|tickets?|landed|cgi|"
+    r"ds-?160|payment|paid|fee|mrv|petition|i-?797|i-?20|sevis|graduat\w*|wedding|my\s+(interview|appointment|slot)\s+(is|was)|yesterday|days?\s+back|\d+\s+days?\s+ago|last\s+(week|night|month))\b",
+    re.I,
+)
+# Agents selling slots, promos, scams. Dropped outright.
 AGENT_SPAM = re.compile(
     r"(contact\s*[:\-]|whatsapp|wa\.me|\bcharges?\b|\bgenuine\b|\bagent\b|recommend|ping\s+(him|her|me)|"
     r"low\s+cost|\bdm\b|\binbox\b|\bin\s+pm\b|booking\s*[:\-]|happy\s+client|payment|\bfee\b|cheap|"
     r"book\s+(an\s+)?early|all\s+categories|reach\s+out|booking\s+available|dates?\s+available\s+for|"
-    r"exchange\s+rates?|salary|scammers?|\bpaid\b|\bprice\b)",
+    r"exchange\s+rates?|salary|scammers?|\bpaid\b|\bprice\b|join\s+(our|this|the)|t\.me/|https?://(?!t\.me/[A-Za-z0-9_]+/\d+)|"
+    r"\bexpert\b|\bagenc(y|ies)\b|\bsupport\s+for\b|ds-?160\s+form|\bhelp\s+you\b|\bservices?\b)",
     re.I,
 )
-# Questions are never slot reports.
-QUESTION = re.compile(r"\?|\b(anyone|any\s+one|which|what|when|how|does|is\s+it|has\s+any)\b", re.I)
+# Questions and requests are never sightings.
+QUESTION = re.compile(
+    r"\?|\b(anyone|any\s+one|which|what|when|how|does|is\s+(it|this|there)|has\s+any|why|where|who|should|could|"
+    r"can\s+(i|we|u|you|anyone|someone)|possible|suggest\w*|advi[cs]e|pls|plz|looking\s+for|need\s+(a\s+)?slot|want\s+(a\s+)?slot|"
+    r"help\s+me|if\s+(they|anyone|someone|you)|do\s+(the|they|you|we|i|u)|are\s+(the|there|they|you)|still\s+open|any\s+(slots?|dates?|update|news|luck|idea))\b",
+    re.I,
+)
+# Screenshot captions that are error/help posts rather than calendars.
+ERRORISH = re.compile(r"\b(error|limit|load\w*|wait\w*|exceeded|try\s+again|stuck|block\w*|lock\w*|issue|problem|help|this|what|why|how|same|anyone)\b", re.I)
 # Bot feeds like VSIHub say "Earliest Slot: Apr 1, 2027 (151 days away)".
 DAYS_AWAY = re.compile(r"\((\d+)\s+days?\s+away\)", re.I)
 MAX_DAYS_AWAY = int(cfg.get("max_days_away", 120))
+NO_PHOTO_CHATS = {c.lower() for c in cfg.get("no_photo_channels", [])}
 
 _last_alert_text = {}
 _last_sound_ts = 0.0
@@ -152,58 +184,121 @@ def mentioned_visa_types(text: str):
     return found
 
 
-def classify(text: str, has_photo: bool):
+def _year(y, month, day, today):
+    if y:
+        y = int(y)
+        return y + 2000 if y < 100 else y
+    # No year given: the next occurrence (allow a week of slack for "booked yesterday" posts)
+    try:
+        cand = today.replace(year=today.year, month=month, day=day)
+    except ValueError:
+        return today.year
+    return today.year if (cand - today).days >= -7 else today.year + 1
+
+
+def days_away(text: str):
+    """Smallest number of days from today to any slot-like date in the text, or None.
+    Dates within +/-1 day are ignored (they're almost always 'posted at' timestamps)."""
+    from datetime import date
+    today = date.today()
+    offsets = []
+
+    def add(y, mo, d):
+        try:
+            offsets.append((date(y, mo, d) - today).days)
+        except ValueError:
+            pass
+
+    for m in DATE_ISO.finditer(text):
+        add(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+    for m in DATE_DM.finditer(text):
+        mo = MONTH_NUM[m.group(2)[:3].lower()]
+        d = int(m.group(1))
+        if 1 <= d <= 31:
+            add(_year(m.group(3), mo, d, today), mo, d)
+    for m in DATE_MD.finditer(text):
+        mo = MONTH_NUM[m.group(1)[:3].lower()]
+        d = int(m.group(2))
+        if 1 <= d <= 31:
+            add(_year(m.group(3), mo, d, today), mo, d)
+    if not offsets:
+        for m in MONTH_ONLY.finditer(text):
+            mo = MONTH_NUM[m.group(1)[:3].lower()]
+            add(_year(m.group(2), mo, 1, today), mo, 1)
+    real = [o for o in offsets if abs(o) > 1]
+    return min(real) if real else None
+
+
+def classify(text: str, has_photo: bool, chat: str = ""):
     """Return (should_alert, reason)."""
-    t = (text or "").lower().strip()
+    raw = text or ""
+    t = raw.lower().strip()
+    chat = (chat or "").lower()
 
     if AGENT_SPAM.search(t):
         return False, "agent spam"
 
-    # Structured bot feeds: alert only if the earliest date is within my window.
+    # City / visa-type filters: if the message names some and none are mine, skip.
+    cities = mentioned_cities(t)
+    if MY_CITIES and cities and not (cities & set(MY_CITIES)):
+        return False, f"other city {sorted(cities)}"
+    vtypes = mentioned_visa_types(t)
+    if MY_VISA_TYPES and vtypes and not (vtypes & set(MY_VISA_TYPES)):
+        return False, f"other visa type {sorted(vtypes)}"
+
+    # Structured bot feeds: "(N days away)".
     m = DAYS_AWAY.search(t)
     if m:
         days = int(m.group(1))
         if days > MAX_DAYS_AWAY:
             return False, f"earliest slot {days}d away (> {MAX_DAYS_AWAY})"
-        cities = mentioned_cities(t)
-        if MY_CITIES and cities and not (cities & set(MY_CITIES)):
-            return False, f"other city {sorted(cities)}"
         return True, f"earliest slot {days}d away"
 
-    # City filter: if the message names cities and none are mine, skip.
-    cities = mentioned_cities(t)
-    if MY_CITIES and cities and not (cities & set(MY_CITIES)):
-        return False, f"other city {sorted(cities)}"
+    far = days_away(raw)
+    too_far = far is not None and far > MAX_DAYS_AWAY
+    negative = bool(NEGATIVE.search(t))
+    question = bool(QUESTION.search(t))
 
-    # Visa type filter: if the message names visa types and none are mine, skip.
-    vtypes = mentioned_visa_types(t)
-    if MY_VISA_TYPES and vtypes and not (vtypes & set(MY_VISA_TYPES)):
-        return False, f"other visa type {sorted(vtypes)}"
-
-    # A screenshot in an alerts channel is the highest-signal thing there is.
-    if has_photo and ALERT_ON_PHOTOS:
-        if NEGATIVE.search(t) and not DATE.search(t):
-            return False, "photo but negative caption"
+    # Screenshots: strong signal in slot-focused groups, unless the caption says otherwise.
+    if has_photo:
+        if not ALERT_ON_PHOTOS or chat in NO_PHOTO_CHATS:
+            return False, "photo (channel not photo-alerting)"
+        if negative or question or ERRORISH.search(t) or NOT_SLOT.search(t):
+            return False, "photo but caption is negative/question/error"
+        if too_far:
+            return False, f"photo but dates {far}d away (> {MAX_DAYS_AWAY})"
         return True, "screenshot posted"
 
     if not t:
         return False, "empty"
-
-    # Very short "NA" style messages.
-    if len(t) <= 4 and re.fullmatch(r"n/?a\.?", t):
+    if re.fullmatch(r"n/?s?a\.?!*", t):
         return False, "NA"
 
-    has_date = bool(DATE.search(t))
-    has_pos = bool(POSITIVE.search(t))
-    has_neg = bool(NEGATIVE.search(t))
+    # Bot formats: "Slots: 5", checkmarks, "SLOTS OPEN" headers — unless marked closed.
+    bot_hit = BOT_COUNT.search(t) or "✅" in raw
+    if bot_hit and not re.search(r"\b(closed|no\s+longer|not\s+available)\b|🛑|❌|⛔|⌛", t):
+        if too_far:
+            return False, f"bot: dates {far}d away (> {MAX_DAYS_AWAY})"
+        return True, "bot availability"
 
-    if has_date and not re.search(r"\b(na|not\s+available|no\s+slots?|closed|gone|vanished|disappeared|missed)\b", t):
-        return True, "date mentioned"
-    if QUESTION.search(t):
+    if question:
         return False, "question"
-    if has_pos and not has_neg:
-        return True, "positive keywords"
-    return False, "no signal" if not has_neg else "negative"
+    if NOT_SLOT.search(t):
+        return False, "paperwork/history context"
+    if negative:
+        return False, "negative"
+    if too_far:
+        return False, f"dates {far}d away (> {MAX_DAYS_AWAY})"
+
+    if STRONG.search(t) or STRONG_CASE.search(raw):
+        return True, "strong signal"
+    if ANY_DATE.search(t):
+        return True, "date mentioned"
+    if AVAIL_VERB.search(t) and SLOT_NOUN.search(t):
+        return True, "availability + slot words"
+    if CONFIRM.search(t) and not CONFIRM_BLOCK.search(t):
+        return True, "booking confirmation"
+    return False, "no signal"
 
 
 def macos_alert(title: str, body: str):
@@ -326,7 +421,7 @@ async def main():
 
     def process(chat, msg_id: int, text: str, has_photo: bool):
         chat_name = getattr(chat, "title", None) or getattr(chat, "username", "chat")
-        should, reason = classify(text, has_photo)
+        should, reason = classify(text, has_photo, getattr(chat, "username", "") or "")
         preview = text.replace("\n", " ")[:120]
         if not should:
             log(f"skip  [{chat_name}] ({reason}) {preview}")

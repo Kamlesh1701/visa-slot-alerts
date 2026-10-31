@@ -10,6 +10,7 @@
     "H_B_L_us_visa_appointments",
     "VisaSlotAlerts",
     "b1b2visaslotsofficial",
+    "b1b2_visas",
     "me"
   ],
   "cities": [
@@ -26,5 +27,6 @@
   "push_bot_token": "",
   "push_chat_id": "",
   "sound": "Glass",
-  "max_days_away": 120
+  "max_days_away": 120,
+  "no_photo_channels": []
 }
