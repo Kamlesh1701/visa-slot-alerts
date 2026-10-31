@@ -47,31 +47,41 @@ Check / join channels:                 `python3 tg_setup.py status` / `python3 t
 
 Either way the login is saved in `session.session`.
 
-## Run (installed as a macOS launch agent)
+## Where it runs: Render (free web service, 24/7)
 
-It runs in the background, starts at login, and restarts itself if it dies.
-`caffeinate -i` stops the Mac from sleeping while it runs (lid must stay open,
-or be plugged in with the lid closed + an external display).
+Code: https://github.com/Kamlesh1701/visa-slot-alerts (public; no secrets in it)
+Service: https://dashboard.render.com/web/srv-dbj5mj8473hc73b80at0
+Status + recent log: https://visa-slot-alerts-nr4x.onrender.com/
 
-    # status
-    launchctl print gui/$(id -u)/com.kamlesh.visa-slot-alerts | grep -E "state|pid"
-    # live log
-    tail -f ~/visa-slot-alerts/watcher.out
-    # stop / start
-    launchctl bootout gui/$(id -u)/com.kamlesh.visa-slot-alerts
+Secrets (Telegram session, API keys, bot token) live only in Render's
+environment variables. The free instance sleeps after 15 idle minutes, so the
+app pings its own URL every 5 minutes to stay awake. Render may restart it
+occasionally; it reconnects on its own.
+
+    # redeploy after changing alert.py (commit + push, then):
+    curl -s -X POST -H "Authorization: Bearer $RENDER_KEY" \
+      https://api.render.com/v1/services/srv-dbj5mj8473hc73b80at0/deploys
+    # change channels / cities / max_days_away: edit the CONFIG_JSON env var
+    # in the Render dashboard (Environment tab) → it redeploys automatically.
+
+## Running on the Mac instead (fallback)
+
+`launchagent.plist.disabled` is the macOS launch agent that was used before.
+To use it again:
+
+    cp ~/visa-slot-alerts/launchagent.plist.disabled ~/Library/LaunchAgents/com.kamlesh.visa-slot-alerts.plist
     launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.kamlesh.visa-slot-alerts.plist
-    # after editing config.json, restart:
-    launchctl kickstart -k gui/$(id -u)/com.kamlesh.visa-slot-alerts
 
-Everything it sees is written to `alerts.log` so you can review what was
-skipped vs alerted and tune the filters.
+(Stop the Render service first or you'll get every alert twice.)
 
 ## Uninstall (when you've got your slot)
 
-    launchctl bootout gui/$(id -u)/com.kamlesh.visa-slot-alerts
-    rm ~/Library/LaunchAgents/com.kamlesh.visa-slot-alerts.plist
-    rm -rf ~/visa-slot-alerts
-    # then Telegram → Settings → Devices → terminate the "Visa Slot Alerts" session
+1. Render dashboard → service → Settings → Delete service.
+2. Delete the GitHub repo (or leave it; it has no secrets).
+3. `rm -rf ~/visa-slot-alerts`
+4. Telegram → Settings → Devices → terminate the "Visa Slot Alerts" session.
+5. Revoke the Render API key (Account Settings → API Keys) and delete the
+   Hugging Face token you created (unused).
 
 ## Security notes (work laptop)
 
