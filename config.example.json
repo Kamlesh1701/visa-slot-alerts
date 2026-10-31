@@ -1,0 +1,28 @@
+{
+  "telegram_api_id": 123456,
+  "telegram_api_hash": "paste-from-my.telegram.org",
+  "channels": [
+    "USvisaAppointmentsHelp",
+    "USB1B2VisaSlots",
+    "b1b2_visa_slots_official",
+    "mumbaivisaslots",
+    "VISA_slot_Expert_B1B2",
+    "H_B_L_us_visa_appointments",
+    "VisaSlotAlerts"
+  ],
+  "cities": [
+    "delhi",
+    "mumbai",
+    "chennai",
+    "hyderabad",
+    "kolkata"
+  ],
+  "visa_types": [
+    "b1/b2"
+  ],
+  "alert_on_photos": true,
+  "push_bot_token": "",
+  "push_chat_id": "",
+  "sound": "Glass",
+  "max_days_away": 120
+}

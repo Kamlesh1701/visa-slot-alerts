@@ -1,0 +1,13 @@
+# never commit credentials or logs
+config.json
+session*.session
+.session_string
+.login_state.json
+*.log
+watcher.out
+qr.png
+qr.html
+__pycache__/
+deploy_hf.py
+tg_setup.py
+qr_login.py
