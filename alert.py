@@ -360,7 +360,7 @@ def start_keepalive_server():
             self.send_response(200)
             self.send_header("Content-Type", "text/plain")
             self.end_headers()
-            tail = LOG_PATH.read_text()[-4000:] if LOG_PATH.exists() else "(no log yet)"
+            tail = LOG_PATH.read_text()[-40000:] if LOG_PATH.exists() else "(no log yet)"
             self.wfile.write(f"visa-slot-alerts up\n\n{tail}".encode())
 
         def log_message(self, *a):  # silence request logging
@@ -419,10 +419,14 @@ async def main():
     if not entities:
         sys.exit("No channels resolved. Check the names in config.json.")
 
-    def process(chat, msg_id: int, text: str, has_photo: bool):
+    def process(chat, msg_id: int, text: str, has_photo: bool, posted=None):
         chat_name = getattr(chat, "title", None) or getattr(chat, "username", "chat")
         should, reason = classify(text, has_photo, getattr(chat, "username", "") or "")
         preview = text.replace("\n", " ")[:120]
+        lag = ""
+        if posted:
+            secs = int((datetime.now(posted.tzinfo) - posted).total_seconds())
+            lag = f"posted {posted.astimezone().strftime('%H:%M:%S')}, caught +{secs}s"
         if not should:
             log(f"skip  [{chat_name}] ({reason}) {preview}")
             return
@@ -430,14 +434,14 @@ async def main():
             log(f"dupe  [{chat_name}] {preview}")
             return
         link = f"https://t.me/{chat.username}/{msg_id}" if getattr(chat, "username", None) else ""
-        log(f"ALERT [{chat_name}] ({reason}) {preview} {link}")
+        log(f"ALERT [{chat_name}] ({reason}) [{lag}] {preview} {link}")
         body = text.strip() or "(screenshot)"
         macos_alert(f"VISA SLOT — {chat_name}", body)
-        phone_push(f"🚨 {chat_name} ({reason})\n\n{body}\n\n{link}")
+        phone_push(f"🚨 {chat_name} ({reason})\n{lag}\n\n{body}\n\n{link}")
 
     @client.on(events.NewMessage(chats=entities))
     async def handler(event):
-        process(await event.get_chat(), event.id, event.raw_text or "", bool(event.photo))
+        process(await event.get_chat(), event.id, event.raw_text or "", bool(event.photo), event.message.date)
 
     log("watching... (Ctrl+C to stop)")
     await client.run_until_disconnected()

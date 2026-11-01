@@ -10,7 +10,7 @@ COPY alert.py .
 RUN chown -R user:user /app
 USER user
 
-ENV PORT=7860 PYTHONUNBUFFERED=1
+ENV PORT=7860 PYTHONUNBUFFERED=1 TZ=Asia/Kolkata
 EXPOSE 7860
 
 CMD ["python", "alert.py"]
